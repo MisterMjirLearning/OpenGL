@@ -1,158 +1,170 @@
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <sstream>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <iostream>
+#include <cmath>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#include "shader.h"
 
-struct ShaderProgramSource
+static void framebuffer_size_callback(GLFWwindow* window, int w, int h);
+
+int main()
 {
-  std::string VertexSource;
-  std::string FragmentSource;
-};
-
-static ShaderProgramSource ParseShader(const std::string &filepath)
-{
-  std::ifstream stream(filepath);
-
-  enum class ShaderType {NONE = -1, VERTEX = 0, FRAGMENT = 1};
-
-  std::string line;
-  std::stringstream ss[2];
-  ShaderType type = ShaderType::NONE;
-  while (std::getline(stream, line))
-  {
-    if (line.find("#shader") != std::string::npos)
-    {
-      if (line.find("vertex") != std::string::npos)
-      {
-        type = ShaderType::VERTEX;
-      }
-      else if (line.find("fragment") != std::string::npos)
-      {
-        type = ShaderType::FRAGMENT;
-      }
-    }
-    else
-    {
-      ss[(int) type] << line << "\n";
-    }
-  }
-
-  return {ss[0].str(), ss[1].str()};
-}
-
-static unsigned int CompileShader(unsigned int type, const std::string &source)
-{
-  unsigned int id = glCreateShader(type);
-  const char* src = source.c_str();
-  glShaderSource(id, 1, &src, nullptr);
-  glCompileShader(id);
-
-  int result;
-  glGetShaderiv(id, GL_COMPILE_STATUS, &result);
-  if (result == GL_FALSE)
-  {
-    int length;
-    glGetShaderiv(id, GL_INFO_LOG_LENGTH, &length);
-    char* message = (char*) alloca(length * sizeof(char));
-    glGetShaderInfoLog(id, length, &length, message);
-    std::cout << "Failed to compile shader\n";
-    std::cout << message << "\n";
-    glDeleteShader(id);
-    return 0;
-  }
-
-  return id;
-}
-
-static unsigned int CreateShader(const std::string &vertexShader, const std::string &fragementShader)
-{
-  unsigned int program = glCreateProgram();
-  unsigned int vs = CompileShader(GL_VERTEX_SHADER, vertexShader);
-  unsigned int fs = CompileShader(GL_FRAGMENT_SHADER, fragementShader);
-
-  glAttachShader(program, vs);
-  glAttachShader(program, fs);
-  glLinkProgram(program);
-  glValidateProgram(program);
-
-  glDeleteShader(vs);
-  glDeleteShader(fs);
-
-  return program;
-}
-
-int main(int argc, char* args[])
-{
-  GLFWwindow* window;
-
+  // Initialize glfw
   if (!glfwInit())
   {
-    std::cout << "glfwInit() error\n";
+    std::cout << "glfwInit() failed\n";
     return -1;
   }
 
-  window = glfwCreateWindow(640, 480, "What's popping?", nullptr, nullptr);
+  // Create a glfw window and assign it to the context
+  GLFWwindow* window = glfwCreateWindow(800, 600, "Learning OpenGL", nullptr, nullptr);
   if (!window)
   {
+    std::cout << "Could not create GLFW window" << "\n";
     glfwTerminate();
-    return 1;
+    return -1;
   }
-
   glfwMakeContextCurrent(window);
 
+  // Initialize glew
   if (glewInit() != GLEW_OK)
   {
     std::cout << "glewInit() error\n";
     return -1;
   }
 
-  float positions[] =
-  {
-    -0.5f, -0.5f,
-     0.5f, -0.5f,
-     0.5f,  0.5f,
-    -0.5f,  0.5f,
+  // GL coordinates are in between -1 and 1, the viewport will scale these
+  glViewport(0, 0, 800, 600);
+
+  // Rescale viewport when window is resized
+  glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+  Shader shader("res/shaders/vertex.glsl", "res/shaders/fragment.glsl");
+
+  // Create vertices
+  float vertices[] = {
+    // Positions        // Colors         // Texture
+     0.5f,  0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // Top Right
+    -0.5f,  0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, // Top Left
+     0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // Bottom Right
+    -0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f  // Bottom Left
   };
 
-  unsigned int indices[] =
-  {
-    0, 1, 2,
+  unsigned int indices[] = {
+    3, 0, 1,
     2, 3, 0
   };
 
-  unsigned int buffer;
-  glGenBuffers(1, &buffer);
-  glBindBuffer(GL_ARRAY_BUFFER, buffer);
-  glBufferData(GL_ARRAY_BUFFER, 6 * 2 * sizeof(float), positions, GL_STATIC_DRAW);
+  // Create a vertex buffer object
+  unsigned int vertexBufferObject;
+  glGenBuffers(1, &vertexBufferObject);
 
+  // Create a vertex array object
+  unsigned int vertexArrayObject;
+  glGenVertexArrays(1, &vertexArrayObject);
+
+  // Create element buffer object
+  unsigned int elementBufferObject;
+  glGenBuffers(1, &elementBufferObject);
+
+  // Bind vertex array
+  glBindVertexArray(vertexArrayObject);
+
+  // Bind vertex buffer
+  glBindBuffer(GL_ARRAY_BUFFER, vertexBufferObject);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+  // Bind element buffer
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementBufferObject);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+  /* Tell GL how to interpret the vertex data */
+  // Position
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) 0);
   glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
+  // Color
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) (3 * sizeof(float)));
+  glEnableVertexAttribArray(1);
+  // Texture
+  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) (6 * sizeof(float)));
+  glEnableVertexAttribArray(2);
 
-  unsigned int ibo;
-  glGenBuffers(1, &ibo);
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6 * sizeof(unsigned int), indices, GL_STATIC_DRAW);
+  // Create texture
+  stbi_set_flip_vertically_on_load(true);
+  // First texture
+  unsigned int texture1;
+  glGenTextures(1, &texture1);
+  glBindTexture(GL_TEXTURE_2D, texture1);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  int width, height, nrChannels;
+  unsigned char* data = stbi_load("res/textures/king_louie.jpg", &width, &height, &nrChannels, 0);
+  if (data)
+  {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+  }
+  else
+  {
+    std::cout << "ERROR::TEXTURE::FAILED_TO_LOAD\n" << std::endl;
+  }
+  stbi_image_free(data);
+  // Second texture
+  unsigned int texture2;
+  glGenTextures(1, &texture2);
+  glBindTexture(GL_TEXTURE_2D, texture2);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  data = stbi_load("res/textures/hbird_logo.png", &width, &height, &nrChannels, 0);
+  if (data)
+  {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+  }
+  else
+  {
+    std::cout << "ERROR::TEXTURE::FAILED_TO_LOAD" << std::endl;
+  }
+  stbi_image_free(data);
 
-  ShaderProgramSource source = ParseShader("res/shaders/basic.shader");
-
-  unsigned int shader = CreateShader(source.VertexSource, source.FragmentSource);
-  glUseProgram(shader);
+  shader.use();
+  shader.setInt("texture1", 0);
+  shader.setInt("texture2", 1);
 
   while (!glfwWindowShouldClose(window))
   {
+    glClearColor(0.0f, 0.5f, 0.8f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texture2);
+
+    shader.use();
+
+    glBindVertexArray(vertexArrayObject);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
 
     glfwSwapBuffers(window);
-
     glfwPollEvents();
   }
 
-  glDeleteProgram(shader);
+  glDeleteVertexArrays(1, &vertexArrayObject);
+  glDeleteBuffers(1, &vertexBufferObject);
+  glDeleteBuffers(1, &elementBufferObject);
 
   glfwTerminate();
   return 0;
+}
+
+void framebuffer_size_callback(GLFWwindow* window, int w, int h)
+{
+  glViewport(0, 0, w, h);
 }
